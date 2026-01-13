@@ -4,7 +4,7 @@ import tensorflow as tf
 from multiprocessing import Pool
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
 
 
 def dataframe_to_example(row, feature_list, all_features):
@@ -97,3 +97,65 @@ def multi_pool(df, n_pools, n_threads, save_path, feature_list, all_features):
     return path_list
 
 
+def parse(serialized_example, feature_list, all_features):
+    """
+    
+    :param serialized_example: 解析数据地址
+    :param feature_list: 拆分特征列表
+    :param all_features: 所有特征列表
+    """
+    if len(feature_list) == 3:
+        dense_features, sparse_features, label = feature_list
+        seq_dense_features, seq_sparse_features = [], []
+        position_features, position_seq_features = [], []
+    elif len(feature_list) == 5:
+        dense_features, sparse_features, label, seq_dense_features, seq_sparse_features = feature_list
+        position_features, position_seq_features = [], []
+    elif len(feature_list) == 7:
+        dense_features, sparse_features, label, seq_dense_features, seq_sparse_features, position_features, position_seq_features = feature_list
+    features_description = {}
+    for col in all_features:
+        if col in dense_features:
+            features_description[col] = tf.io.FixedLenFeature([], tf.float32, default_value=0)
+        elif col in sparse_features:
+            features_description[col] = tf.io.FixedLenFeature([], tf.string, default_value="0")
+        elif col in seq_dense_features:
+            features_description[col] = tf.io.FixedLenSequenceFeature([], tf.float32, allow_missing=True)
+        elif col in seq_sparse_features:
+            features_description[col] = tf.io.FixedLenSequenceFeature([], tf.string, allow_missing=True)
+        elif col in position_features:
+            features_description[col] = tf.io.FixedLenFeature([], tf.string, default_value="0")
+        elif col in position_seq_features:
+            features_description[col] = tf.io.FixedLenSequenceFeature([], tf.string, allow_missing=True)
+        elif col in label:
+            features_description[col] = tf.io.FixedLenFeature([], tf.float32, default_value=0)
+        else:
+            features_description[col] = tf.io.FixedLenFeature([], tf.float32, default_value=0)
+    parse_features = tf.io.parse_single_example(serialized_example, features_description)
+    feature_dict = {}
+    for col in all_features:
+        if col not in label:
+            feature_dict[col] = parse_features[col]
+    label_dict = tuple([parse_features[label[i]] for i in range(len(label))]) if len(label) > 1 else parse_features[label[0]]
+
+    return feature_dict, label_dict
+
+
+def get_evaluate(df, true_label, pred_label, pred_proba, text):
+    """
+    
+    :param df: dataframe数据
+    :param true_label: 真实标签列名
+    :param pred_label: 预测标签列名
+    :param pred_proba: 预测概率列名
+    :param text: 文本描述
+    """
+    y_true = df[true_label].tolist()
+    pred_label = df[pred_label].tolist()
+    pred_proba = df[pred_proba].tolist()
+    print('结果 {}: '.format(text))
+    print('acc:{:.6f}'.format(accuracy_score(y_true=y_true, y_pred=pred_label)))
+    print('auc:{:.6f}'.format(roc_auc_score(y_true=y_true, y_score=pred_proba)))
+    target_names = ['negative', 'positive']
+    x = classification_report(y_true=y_true, y_pred=pred_label, target_names=target_names)
+    print(str(x))
